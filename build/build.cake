@@ -6,6 +6,8 @@
 
 #tool nuget:?package=ILRepack&version=2.0.18
 
+#load buildData.cake
+
 using System.Text.RegularExpressions;
 using System.Linq;
 
@@ -46,6 +48,22 @@ var paths = new {
     solutionPath = resolveDirectoryPath("./../src/MagicChunks.sln"),
 };
 
+// Setup / Teardown
+
+Setup<BuildData>(setupContext => {
+    var buildData =
+        new BuildData(
+            configuration: Argument("configuration", "Release"),
+            versionNumber: Argument("versionnumber", "0.0.0"),
+            versionBuild: Argument("versionbuild", "0")
+        );
+
+    Information("Version: " + string.Format("{0}.{1}", buildData.VersionNumber, buildData.VersionBuild));
+    Information("Version: " + string.Format("{0}-{1}", buildData.VersionNumber, buildData.VersionBuild));
+
+    return buildData;
+});
+
 // Tasks
 
 Task("PrepareOutputFolders")
@@ -73,7 +91,7 @@ Task("RestorePackages")
 
 Task("UpdateVersion")
     .Description("Updates version for assembly and packages")
-    .Does(() => {
+    .Does<BuildData>(data => {
 
         // Update assembly version
 
@@ -91,9 +109,9 @@ Task("UpdateVersion")
                 Description = assemblyInfo.Description,
                 Guid = assemblyInfo.Guid,
                 InternalsVisibleTo = assemblyInfo.InternalsVisibleTo,
-                Version = string.Format("{0}.{1}", version, versionbuild),
-                FileVersion = string.Format("{0}.{1}", version, versionbuild),
-                InformationalVersion = string.Format("{0}-{1}", version, versionbuild),
+                Version = string.Format("{0}.{1}", data.VersionNumber, data.VersionBuild),
+                FileVersion = string.Format("{0}.{1}", data.VersionNumber, data.VersionBuild),
+                InformationalVersion = string.Format("{0}-{1}", data.VersionNumber, data.VersionBuild),
                 Copyright = assemblyInfo.Copyright,
                 Trademark = assemblyInfo.Trademark
             });
@@ -105,7 +123,7 @@ Task("UpdateVersion")
         foreach (var path in nuspecFiles)
         {
             Information("Nuspec: " + path);
-            XmlPoke(path, "/nuspec:package/nuspec:metadata/nuspec:version", version, new XmlPokeSettings {
+            XmlPoke(path, "/nuspec:package/nuspec:metadata/nuspec:version", data.VersionNumber, new XmlPokeSettings {
                 Namespaces = new Dictionary<string, string> {
                     { "nuspec", "http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd" }
                 }
@@ -117,11 +135,11 @@ Task("UpdateVersion")
         foreach (var f in vssFiles)
         {
             var o = (Newtonsoft.Json.Linq.JObject)Newtonsoft.Json.JsonConvert.DeserializeObject(System.IO.File.ReadAllText(f.FullPath));
-            o["version"] = version;
+            o["version"] = data.VersionNumber;
             System.IO.File.WriteAllText(f.FullPath, Newtonsoft.Json.JsonConvert.SerializeObject(o, Newtonsoft.Json.Formatting.Indented));
         }
 
-        var versionMatch = System.Text.RegularExpressions.Regex.Match(version, @"^(\d+)\.(\d+)\.(\d+)$");
+        var versionMatch = System.Text.RegularExpressions.Regex.Match(data.VersionNumber, @"^(\d+)\.(\d+)\.(\d+)$");
         if (versionMatch.Success && (versionMatch.Groups.Count == 4))
         {
             var taskFiles = GetFiles(paths.workingDirSolutionDir + "/MagicChunks/**/task.json");
@@ -143,7 +161,7 @@ Task("UpdateVersion")
         }
         else
         {
-            Warning("Unable to parse version: " + version);
+            Warning("Unable to parse version: " + data.VersionNumber);
         }
     });
 
@@ -152,23 +170,23 @@ Task("Build")
     .IsDependentOn("PrepareOutputFolders")
     .IsDependentOn("RestorePackages")
     .IsDependentOn("UpdateVersion")
-    .Does(() => {
+    .Does<BuildData>(data => {
         MSBuild(paths.workingDirSolutionPath, new MSBuildSettings {
             Verbosity = Verbosity.Minimal,
             ToolVersion = MSBuildToolVersion.VS2017,
-            Configuration = configuration,
+            Configuration = data.Configuration,
             PlatformTarget = PlatformTarget.MSIL,
         }.WithTarget("Build"));
 
         ILRepack(
-            paths.workingDirSolutionDir + "/MagicChunks/bin/" + configuration + "/netstandard1.3/MagicChunks.dll",
-            paths.workingDirSolutionDir + "/MagicChunks/bin/" + configuration + "/netstandard1.3/MagicChunks.dll",
-            GetFiles(paths.workingDirSolutionDir + "/MagicChunks/bin/" + configuration + "/netstandard1.3/*.dll"),
+            paths.workingDirSolutionDir + "/MagicChunks/bin/" + data.Configuration + "/netstandard1.3/MagicChunks.dll",
+            paths.workingDirSolutionDir + "/MagicChunks/bin/" + data.Configuration + "/netstandard1.3/MagicChunks.dll",
+            GetFiles(paths.workingDirSolutionDir + "/MagicChunks/bin/" + data.Configuration + "/netstandard1.3/*.dll"),
             new ILRepackSettings { Internalize = true });
 
-        CopyFiles(paths.workingDirSolutionDir + "/MagicChunks" + "/bin/" + configuration + "/netstandard1.3/MagicChunks*.dll", paths.workingDirDotNet);
-        CopyFiles(paths.workingDirSolutionDir + "/MagicChunks.Cake" + "/bin/" + configuration + "/netstandard1.6/MagicChunks.Cake.dll", paths.workingDirDotNet);
-        CopyFiles(paths.workingDirSolutionDir + "/MagicChunks.Cake" + "/bin/" + configuration + "/netstandard2.0/MagicChunks.Cake.dll", paths.workingDirDotNet);
+        CopyFiles(paths.workingDirSolutionDir + "/MagicChunks" + "/bin/" + data.Configuration + "/netstandard1.3/MagicChunks*.dll", paths.workingDirDotNet);
+        CopyFiles(paths.workingDirSolutionDir + "/MagicChunks.Cake" + "/bin/" + data.Configuration + "/netstandard1.6/MagicChunks.Cake.dll", paths.workingDirDotNet);
+        CopyFiles(paths.workingDirSolutionDir + "/MagicChunks.Cake" + "/bin/" + data.Configuration + "/netstandard2.0/MagicChunks.Cake.dll", paths.workingDirDotNet);
         CopyFiles(paths.workingDirSolutionDir + "/MagicChunks/MSBuild/*.targets", paths.workingDirDotNet);
         CopyFiles(paths.workingDirSolutionDir + "/MagicChunks/Powershell/*.ps*", paths.workingDirDotNet);
     });
@@ -182,14 +200,14 @@ Task("Pack")
 Task("PackDotnet")
     .Description("Packs library into zip package")
     .IsDependentOn("Build")
-    .Does(() => {
-        Zip(paths.workingDirDotNet, System.IO.Path.Combine(paths.workingDirDotNet, "MagicChunks-" + version + ".zip"));
+    .Does<BuildData>(data => {
+        Zip(paths.workingDirDotNet, System.IO.Path.Combine(paths.workingDirDotNet, "MagicChunks-" + data.VersionNumber + ".zip"));
     });
 
 Task("PackNuget")
     .Description("Packs library into Nuget package")
     .IsDependentOn("Build")
-    .Does(() => {
+    .Does<BuildData>(data => {
         EnsureDirectoryExists(paths.workingDirNuget + "/netstandard1.3/MagicChunks");
         EnsureDirectoryExists(paths.workingDirNuget + "/netstandard1.6/MagicChunks");
         EnsureDirectoryExists(paths.workingDirNuget + "/netstandard2.0/MagicChunks");
@@ -203,7 +221,7 @@ Task("PackNuget")
         foreach (string file in System.IO.Directory.EnumerateFiles(paths.workingDirNuget, "*.nuspec"))
         {
             NuGetPack(file, new NuGetPackSettings {
-                Version = string.Format("{0}.{1}", version, versionbuild),
+                Version = string.Format("{0}.{1}", data.VersionNumber, data.VersionBuild),
                 OutputDirectory = paths.workingDirNuget
             });
         }
@@ -233,8 +251,5 @@ Task("Default")
     .IsDependentOn("Pack");
 
 // Run
-
-Information("Version: " + string.Format("{0}.{1}", version, versionbuild));
-Information("Version: " + string.Format("{0}-{1}", version, versionbuild));
 
 RunTarget(target);
